@@ -1,0 +1,25 @@
+image: atlassian/default-image:4
+
+pipelines:
+  branches:
+    main:
+      - step:
+          name: CICD Test
+          services:
+            - docker
+          script:
+            - docker login $URL_ACR -u $USER_ACR -p $PASSWORD_ACR
+            - export BITBUCKET_COMMIT_SHORT=$(echo $BITBUCKET_COMMIT | cut -c1-7)
+            - export IMAGE_NAME=$URL_ACR/frontend:$BITBUCKET_COMMIT_SHORT
+            - docker build -t $IMAGE_NAME .
+            - docker push $IMAGE_NAME
+            - pipe: microsoft/azure-aks-deploy:1.0.2
+              variables:
+                AZURE_APP_ID: $AZURE_APP_ID
+                AZURE_PASSWORD: $AZURE_PASSWORD
+                AZURE_TENANT_ID: $AZURE_TENANT_ID
+                AZURE_AKS_NAME: $AKS_NAME
+                AZURE_RESOURCE_GROUP: $RG_AKS
+                KUBECTL_COMMAND: 'set image deployment/internalapp-frontend'
+                KUBECTL_ARGUMENTS: 'frontend-container=$IMAGE_NAME -n devops-2'
+                DEBUG: 'true'
