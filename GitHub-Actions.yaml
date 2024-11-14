@@ -1,39 +1,33 @@
-# GitHub Actions
 name: Deploy to Azure
 
 on:
   push:
     branches:
-      - main  # Trigger on push to the main branch
+      - main 
 
 jobs:
   build-and-push:
-    name: Build & Push  # Renamed job to "Build & Push"
+    name: Build & Push
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout code with commit history
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 2  # Fetch the last two commits for change detection
+          fetch-depth: 2
 
-      # Step 2: Set Commit ID for Tagging
       - name: Set Commit ID as Tag
         run: echo "COMMIT_ID=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_ENV
 
-      # Step 3: Login to Azure
       - name: Login to Azure
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Step 4: Login to Azure Container Registry
       - name: Login to Azure Container Registry
         run: |
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_NAME }}.azurecr.io -u ${{ secrets.ACR_USERNAME }} --password-stdin
 
-      # Step 5: Build Docker Image for service-hello
       - name: Build Docker Image for service-hello
         env:
           COMMIT_ID: ${{ env.COMMIT_ID }}
@@ -42,7 +36,6 @@ jobs:
         run: |
           docker build -t $ACR_NAME.azurecr.io/$CONTAINER_REGISTRY:$COMMIT_ID -f ./service-hello/Dockerfile .
 
-      # Step 6: Push Docker Image to Azure Container Registry
       - name: Push Docker Image to Azure Container Registry
         env:
           COMMIT_ID: ${{ env.COMMIT_ID }}
@@ -51,28 +44,41 @@ jobs:
         run: |
           docker push $ACR_NAME.azurecr.io/$CONTAINER_REGISTRY:$COMMIT_ID
 
-  deploy-to-containerapps:
-    name: Deploy to Container Apps  # Renamed job to "Deploy"
+  manual-approval:
+    name: Manual Approval
+    runs-on: ubuntu-latest
     needs: build-and-push
+    permissions:
+      issues: write
+
+    steps:
+      - name: Await Manual Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: ilhaminternnawa
+          minimum-approvals: 1
+          issue-title: "Manual Approval Required"
+          issue-body: "Please approve or deny the deployment for this change."
+
+  deploy-to-containerapps:
+    name: Deploy to Container Apps
+    needs: manual-approval  
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Login to Azure
       - name: Login to Azure
-        uses: azure/login@v1
+        uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-        
-      # Step 2: Set Commit ID for Tagging
+
       - name: Set Commit ID as Tag
         run: echo "COMMIT_ID=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_ENV
 
-      # Step 3: Install Azure CLI containerapp extension if not already installed
       - name: Install Azure CLI containerapp extension
         run: |
           az extension add --name containerapp --upgrade || echo "containerapp extension already installed"
 
-      # Step 4: Deploy service-hello to Azure Container Apps
       - name: Deploy service-hello
         env:
           CONTAINER_APP_NAME: ${{ secrets.CONTAINER_APP_NAME }}
@@ -85,29 +91,25 @@ jobs:
 
   deploy-to-aks:
     name: Deploy to AKS
-    needs: build-and-push
+    needs: manual-approval  
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Login to Azure
       - name: Login to Azure
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Step 2: Set Commit ID for Tagging
       - name: Set Commit ID as Tag
         run: echo "COMMIT_ID=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_ENV
 
       - name: Set The Cluster Subscription
         run: az account set --subscription ${{ secrets.AKS_SUBSCRIPTION }}
 
-      # Step 3: Set up kubectl with AKS credentials
       - name: Get AKS Credentials
         run: |
           az aks get-credentials --resource-group ${{ secrets.AKS_RESOURCE_GROUP }} --name ${{ secrets.AKS_CLUSTER_NAME }}
 
-      # Step 4: Deploy to AKS
       - name: Deploy to AKS
         env:
           CONTAINER_REGISTRY: ${{ secrets.CONTAINER_REGISTRY }}
